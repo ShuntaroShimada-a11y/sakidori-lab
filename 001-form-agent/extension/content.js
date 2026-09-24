@@ -387,10 +387,13 @@
 - checkbox と radio は value を checked にする
 - 金額・日付・同意のチェックは、指示に明記が無いかぎり返さない`;
 
+  // 入出力の言語は必ず伝える。伝えないと警告が出て、日本語の品質も保証されない
+  const LANGS = { expectedInputs: [{ type: "text", languages: ["ja", "en"] }], expectedOutputs: [{ type: "text", languages: ["ja"] }] };
+
   async function localAvailable() {
     try {
       if (typeof LanguageModel === "undefined") return "なし";
-      return await LanguageModel.availability();     // unavailable / downloadable / downloading / available
+      return await LanguageModel.availability(LANGS);   // unavailable / downloadable / downloading / available
     } catch { return "なし"; }
   }
 
@@ -398,6 +401,7 @@
   async function localAsk(tree, profile, note) {
     if (!localSession) {
       localSession = await LanguageModel.create({
+        ...LANGS,
         initialPrompts: [{ role: "system", content: LOCAL_RULES }],
         monitor(m) {
           m.addEventListener("downloadprogress", e => {
