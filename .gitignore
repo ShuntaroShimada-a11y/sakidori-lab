@@ -1,0 +1,6 @@
+# 手元だけのもの（録画・スクリーンショット・大きい素材）
+_local/
+
+node_modules/
+.DS_Store
+Thumbs.db

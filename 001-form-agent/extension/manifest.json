@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "sakidori フォーム記入",
+  "version": "0.1.0",
+  "description": "面倒なWebフォームを、保存した自分の情報からAIが下書きします。送信は必ずあなたが押します。",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://api.anthropic.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "このフォームを下書きする" },
+  "options_page": "options.html",
+  "browser_specific_settings": {
+    "gecko": { "id": "form-agent@sakidori.app", "strict_min_version": "121.0" },
+    "gecko_android": {}
+  }
+}

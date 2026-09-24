@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>資料請求フォーム（動作確認用）</title>
+<style>
+/* わざと実在サイトに寄せてある：label[for] を付けず、div とクラスで組む */
+body{margin:0;background:#EEF1F5;color:#222;font:15px/1.9 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.wrap{max-width:620px;margin:0 auto;padding:32px 18px 80px}
+h1{font-size:21px;margin:0 0 4px}
+.sub{color:#667;font-size:13.5px;margin:0 0 20px}
+.frm{background:#fff;border:1px solid #D5DBE3;border-radius:10px;padding:22px}
+.frm-row{padding:14px 0;border-bottom:1px solid #EDF0F4}
+.frm-row:last-of-type{border-bottom:none}
+.lbl{font-size:13px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:7px}
+.req{background:#C4332B;color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px}
+.opt{background:#EDF0F4;color:#667;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px}
+input[type=text],input[type=email],input[type=password],select,textarea{
+  width:100%;font:inherit;font-size:14px;padding:8px 10px;border:1px solid #C4CDD7;border-radius:6px;background:#FCFDFE}
+textarea{min-height:76px;resize:vertical}
+.tri{display:grid;grid-template-columns:1fr 12px 1fr 12px 1fr;gap:6px;align-items:center;max-width:320px}
+.tri .dash{text-align:center;color:#99A}
+.choices{display:flex;gap:16px;flex-wrap:wrap;margin-top:2px}
+.choices label{font-size:14px;display:flex;align-items:center;gap:5px;cursor:pointer}
+.hide{display:none}
+.err{color:#C4332B;font-size:12.5px;font-weight:700;margin-top:5px}
+.bad input,.bad select,.bad textarea{border-color:#C4332B;background:#FDF3F2}
+.sbm{margin-top:22px;text-align:center}
+button{font:inherit;font-weight:700;font-size:15px;padding:12px 40px;border-radius:7px;border:none;background:#25405E;color:#fff;cursor:pointer}
+.done{background:#E3F3EA;border:1px solid #1F7A4D;color:#14532D;border-radius:8px;padding:16px;font-weight:700;margin-top:18px}
+.hint{color:#8891A0;font-size:12px;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>資料請求フォーム</h1>
+  <p class="sub">動作確認用のページです。実際にはどこにも送信されません。</p>
+
+  <form class="frm" id="f" novalidate>
+    <div class="frm-row">
+      <div class="lbl">会社名<span class="req">必須</span></div>
+      <input type="text" name="company" placeholder="株式会社サキドリ">
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">お名前<span class="req">必須</span></div>
+      <input type="text" name="name" placeholder="山田 太郎">
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">お名前（全角カナ）<span class="req">必須</span></div>
+      <input type="text" name="kana" placeholder="ヤマダ タロウ">
+      <div class="hint">全角カタカナでご入力ください</div>
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">電話番号<span class="req">必須</span></div>
+      <div class="tri">
+        <input type="text" name="tel1" maxlength="4"><span class="dash">－</span>
+        <input type="text" name="tel2" maxlength="4"><span class="dash">－</span>
+        <input type="text" name="tel3" maxlength="4">
+      </div>
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">メールアドレス<span class="req">必須</span></div>
+      <input type="email" name="email" placeholder="taro@example.com">
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">従業員規模<span class="req">必須</span></div>
+      <select name="scale">
+        <option value="">選択してください</option>
+        <option>1〜10名</option><option>11〜50名</option><option>51〜100名</option>
+        <option>101〜300名</option><option>301〜1000名</option><option>1001名以上</option>
+      </select>
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">ご検討時期<span class="req">必須</span></div>
+      <select name="when">
+        <option value="">選択してください</option>
+        <option>すぐに導入したい</option><option>3ヶ月以内</option>
+        <option>6ヶ月以内</option><option>1年以内</option><option>情報収集のみ</option>
+      </select>
+    </div>
+
+    <!-- 見せ場その1：「その他」を選ぶと、最初は存在しない必須欄が現れる -->
+    <div class="frm-row">
+      <div class="lbl">お問い合わせ種別<span class="req">必須</span></div>
+      <div class="choices">
+        <label><input type="radio" name="kind" value="product">製品について</label>
+        <label><input type="radio" name="kind" value="price">料金について</label>
+        <label><input type="radio" name="kind" value="other">その他</label>
+      </div>
+    </div>
+    <div class="frm-row hide" id="otherRow">
+      <div class="lbl">種別の詳細<span class="req">必須</span></div>
+      <input type="text" name="otherDetail" placeholder="ご用件を具体的にご記入ください">
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">ご希望の連絡方法<span class="opt">任意</span></div>
+      <div class="choices">
+        <label><input type="checkbox" name="byMail">メール</label>
+        <label><input type="checkbox" name="byTel">電話</label>
+      </div>
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">お問い合わせ内容<span class="opt">任意</span></div>
+      <textarea name="body" placeholder="ご質問やご要望がございましたらご記入ください"></textarea>
+    </div>
+
+    <div class="frm-row">
+      <div class="lbl">個人情報の取り扱いについて<span class="req">必須</span></div>
+      <div class="choices"><label><input type="checkbox" name="agree">同意する</label></div>
+    </div>
+
+    <div class="sbm"><button type="submit">送信する</button></div>
+  </form>
+
+  <div id="done" class="done hide">送信しました。（確認用ページなので、実際には何も送られていません）</div>
+</div>
+
+<script>
+// 「その他」を選んだときだけ、詳細欄を出す
+document.querySelectorAll('input[name=kind]').forEach(r => {
+  r.addEventListener('change', () => {
+    document.getElementById('otherRow').classList.toggle('hide', r.value !== 'other' || !r.checked);
+  });
+});
+
+// 見せ場その2：必須の入れ忘れでエラーを出して戻す
+document.getElementById('f').addEventListener('submit', e => {
+  e.preventDefault();
+  document.querySelectorAll('.err').forEach(n => n.remove());
+  document.querySelectorAll('.bad').forEach(n => n.classList.remove('bad'));
+
+  const need = [['company','会社名'],['name','お名前'],['kana','お名前（全角カナ）'],
+                ['tel1','電話番号'],['email','メールアドレス'],['scale','従業員規模'],['when','ご検討時期']];
+  let ng = 0;
+  const fail = (el, msg) => {
+    const row = el.closest('.frm-row'); row.classList.add('bad');
+    const d = document.createElement('div'); d.className = 'err'; d.textContent = msg;
+    row.appendChild(d); ng++;
+  };
+  for (const [n, label] of need) {
+    const el = document.querySelector(`[name=${n}]`);
+    if (!el.value.trim()) fail(el, `${label}を入力してください`);
+  }
+  const kana = document.querySelector('[name=kana]');
+  if (kana.value.trim() && !/^[ァ-ヶー　\s]+$/.test(kana.value)) fail(kana, '全角カタカナで入力してください');
+  const kind = document.querySelector('input[name=kind]:checked');
+  if (!kind) fail(document.querySelector('input[name=kind]'), 'お問い合わせ種別を選択してください');
+  else if (kind.value === 'other' && !document.querySelector('[name=otherDetail]').value.trim())
+    fail(document.querySelector('[name=otherDetail]'), '種別の詳細を入力してください');
+  if (!document.querySelector('[name=agree]').checked)
+    fail(document.querySelector('[name=agree]'), '個人情報の取り扱いに同意してください');
+
+  if (ng) { document.querySelector('.bad').scrollIntoView({block:'center', behavior:'smooth'}); return; }
+  document.getElementById('f').classList.add('hide');
+  document.getElementById('done').classList.remove('hide');
+});
+</script>
+</body>
+</html>

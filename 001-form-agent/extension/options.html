@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sakidori フォーム記入 — 設定</title>
+<style>
+:root{--bg:#F1F4F8;--surface:#fff;--ink:#16202B;--muted:#5C6B7A;--line:#D2DCE5;--accent:#C85E18;--ok:#1F7A4D}
+@media (prefers-color-scheme:dark){:root{--bg:#0D141C;--surface:#16202B;--ink:#E6EDF4;--muted:#8497A8;--line:#26333F;--accent:#F2934A;--ok:#6FCF97}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.8 "Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:36px 20px 64px}
+h1{font-size:22px;margin:0 0 6px}
+h2{font-size:15px;margin:32px 0 4px}
+p.sub{color:var(--muted);font-size:13.5px;margin:0 0 4px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;margin-top:12px}
+label{display:block;font-size:12.5px;color:var(--muted);margin:12px 0 4px}
+label:first-of-type{margin-top:0}
+input,textarea{width:100%;font:inherit;font-size:14px;padding:9px 11px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);color:var(--ink)}
+input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+textarea{min-height:70px;resize:vertical}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+@media (max-width:560px){.grid{grid-template-columns:1fr}}
+.bar{position:sticky;bottom:0;background:var(--bg);padding:16px 0 0;margin-top:20px;display:flex;gap:12px;align-items:center}
+button{font:inherit;font-weight:700;font-size:14px;padding:10px 20px;border-radius:8px;border:1px solid var(--accent);
+  background:var(--accent);color:#fff;cursor:pointer}
+button.sub{background:transparent;color:var(--ink);border-color:var(--line)}
+#msg{color:var(--ok);font-weight:700;font-size:13.5px}
+.note{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
+  padding:13px 15px;font-size:13.5px;color:var(--muted);line-height:1.75;margin-top:12px}
+.note b{color:var(--ink)}
+a{color:var(--accent)}
+ul{margin:6px 0 0;padding-left:20px;font-size:13.5px;color:var(--muted);line-height:1.8}
+</style>
+</head>
+<body>
+<main>
+  <h1>sakidori フォーム記入</h1>
+  <p class="sub">面倒なフォームを、保存した情報からAIが下書きします。送信は必ずあなたが押します。</p>
+
+  <div class="note">
+    <b>ここに入れた内容は、この端末の中だけに保存されます。</b>
+    フォームを埋めるときに Anthropic（Claude）へ送られますが、<b>運営者のサーバーは一切通りません</b>。保存も集計もしていません。
+  </div>
+
+  <h2>1. APIキー</h2>
+  <p class="sub">Claude のAPIキー。<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> で発行できます。</p>
+  <div class="card">
+    <label for="apiKey">APIキー（sk-ant-… で始まる文字列）</label>
+    <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-api03-…">
+    <label style="margin-top:10px"><input type="checkbox" id="reveal" style="width:auto;margin-right:6px">入力した文字を表示する</label>
+  </div>
+
+  <h2>2. よく使う自分の情報</h2>
+  <p class="sub">一度入れておけば、どのフォームでも使い回します。空の項目は使われません。</p>
+  <div class="card">
+    <div class="grid">
+      <div><label for="name">氏名（漢字）</label><input id="name" placeholder="山田 太郎"></div>
+      <div><label for="kana">氏名（カナ）</label><input id="kana" placeholder="ヤマダ タロウ"></div>
+      <div><label for="romaji">氏名（ローマ字）</label><input id="romaji" placeholder="Taro Yamada"></div>
+      <div><label for="birth">生年月日</label><input id="birth" placeholder="1990-04-01"></div>
+      <div><label for="email">メールアドレス</label><input id="email" placeholder="taro@example.com"></div>
+      <div><label for="tel">電話番号</label><input id="tel" placeholder="090-1234-5678"></div>
+      <div><label for="zip">郵便番号</label><input id="zip" placeholder="150-0001"></div>
+      <div><label for="pref">都道府県</label><input id="pref" placeholder="東京都"></div>
+      <div><label for="city">市区町村</label><input id="city" placeholder="渋谷区神宮前"></div>
+      <div><label for="addr">番地・建物</label><input id="addr" placeholder="1-2-3 サキドリビル 4F"></div>
+      <div><label for="company">勤務先</label><input id="company" placeholder="株式会社サキドリ"></div>
+      <div><label for="dept">部署・役職</label><input id="dept" placeholder="開発部 / エンジニア"></div>
+    </div>
+    <label for="misc">その他（自由に書いてください）</label>
+    <textarea id="misc" placeholder="例：従業員規模 51〜100名／最終学歴 〇〇大学 2013年卒／希望連絡時間 平日18時以降"></textarea>
+  </div>
+
+  <div class="bar">
+    <button id="save">保存する</button>
+    <button class="sub" id="clear">全部消す</button>
+    <span id="msg"></span>
+  </div>
+
+  <h2>この拡張機能がしないこと</h2>
+  <div class="note">
+    <ul>
+      <li><b>送信ボタンを押しません。</b>埋めるところまでで止まります</li>
+      <li><b>CAPTCHA・画像認証には触れません。</b>出てきたらそこで終了します</li>
+      <li><b>ログインしません。</b>IDやパスワードは扱いません</li>
+      <li><b>別のページへ移動しません。</b>いま開いているページの中だけで動きます</li>
+      <li>ボタンを押したときだけ、そのタブで動きます（常時監視はしません）</li>
+    </ul>
+  </div>
+</main>
+<script src="options.js"></script>
+</body>
+</html>
