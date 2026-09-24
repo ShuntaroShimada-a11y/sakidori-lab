@@ -35,7 +35,7 @@ const PORT = Number(process.env.PORT || 8899);
 const STAMP = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 13);
 
 // 埋めてほしいことの指示。動画に出るので、短く具体的に
-const NOTE = process.env.NOTE || "資料請求です。請求書の宛名を変更したい件で、急ぎです。連絡はメールで。";
+const NOTE = process.env.NOTE || "請求書の宛名を変更したいです。製品や料金の問い合わせではありません。急ぎです。連絡はメールで。";
 const BRAIN = process.env.BRAIN || "auto";
 const PASS2 = process.env.PASS2 === "1";
 
@@ -68,6 +68,12 @@ APIキーが見つかりません。次のどちらかを用意してくださ�
 
 // Edge を先に試す。Chrome は 152 以降、--load-extension を無視するようになった（拡張機能が読み込めない）。
 // Edge も Chromium なので、拡張機能の動きも撮れる絵も同じ。
+function workspaceId() {
+  const f = join(OUT, "workspace.txt");
+  if (existsSync(f)) { const w = readFileSync(f, "utf8").trim(); if (w) return w; }
+  return (process.env.ANTHROPIC_WORKSPACE_ID || "").trim();
+}
+
 const BROWSERS = [
   process.env.BROWSER_PATH,
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -83,6 +89,7 @@ function serve() {
   return new Promise(res => {
     const s = createServer((req, r) => {
       const p = join(EXT, "test", (req.url || "/").split("?")[0] === "/" ? "form.html" : (req.url || "").split("?")[0]);
+      if (/favicon/.test(req.url || "")) { r.writeHead(204); r.end(); return; }
       if (!existsSync(p)) { r.writeHead(404); r.end("not found"); return; }
       r.writeHead(200, { "content-type": MIME[extname(p)] || "text/plain" });
       r.end(readFileSync(p));
@@ -129,7 +136,7 @@ try {
   console.log(`拡張機能         ${new URL(target.url()).host}`);
 
   // 設定を入れる（本来は設定画面から人が入れるところ）
-  await worker.evaluate(async (k, p, b) => { await chrome.storage.local.set({ apiKey: k, profile: p, brain: b }); }, KEY, PROFILE, BRAIN);
+  await worker.evaluate(async (k, p, b, w) => { await chrome.storage.local.set({ apiKey: k, profile: p, brain: b, workspaceId: w }); }, KEY, PROFILE, BRAIN, workspaceId());
   console.log(`保存した情報     ${Object.keys(PROFILE).length} 項目`);
   console.log(`使う頭脳         ${BRAIN}${KEY ? "" : "（APIキーなし）"}`);
 
@@ -147,19 +154,26 @@ try {
   const invoke = async () => {
     await worker.evaluate(async id => { await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content.js"] }); }, tabId);
     await page.waitForFunction(
-      () => !!document.querySelector("[data-sk-ui]")?.shadowRoot?.getElementById("note"), { timeout: 15000 });
+      () => !!document.querySelector("[data-sk-panel]")?.shadowRoot?.getElementById("note"), { timeout: 15000 });
   };
   const go = async t => page.evaluate(x => {
-    const sr = document.querySelector("[data-sk-ui]").shadowRoot;
+    const sr = document.querySelector("[data-sk-panel]").shadowRoot;
     sr.getElementById("note").value = x;
     sr.getElementById("go").click();
   }, t);
-  const settle = () => page.waitForFunction(() => {
-    const sr = document.querySelector("[data-sk-ui]")?.shadowRoot;
-    return !!(sr?.getElementById("list") || sr?.querySelector(".err") || sr?.querySelector(".note"));
-  }, { timeout: 180000, polling: 800 }).catch(() => console.log("！ 時間切れ。そこまでを保存します。"));
+  const settle = async () => {
+    // まず「始まったこと」を確かめる（実況が出る）。
+    // これを待たずに終了条件を見ると、入力画面に残っている .note で即座に抜けてしまう。
+    await page.waitForFunction(() => !!document.querySelector("[data-sk-panel]")?.shadowRoot?.getElementById("log"),
+      { timeout: 20000 }).catch(() => null);
+    await page.waitForFunction(() => {
+      const sr = document.querySelector("[data-sk-panel]")?.shadowRoot;
+      if (!sr) return true;
+      return !!(sr.getElementById("list") || sr.querySelector(".err") || (!sr.getElementById("log") && sr.querySelector(".note")));
+    }, { timeout: 180000, polling: 800 }).catch(() => console.log("！ 時間切れ。そこまでを保存します。"));
+  };
   await page.waitForFunction(
-    () => !!document.querySelector("[data-sk-ui]")?.shadowRoot?.getElementById("note"), { timeout: 15000 });
+    () => !!document.querySelector("[data-sk-panel]")?.shadowRoot?.getElementById("note"), { timeout: 15000 });
 
   // ---- 撮影開始
   const frames = [];
@@ -181,10 +195,8 @@ try {
   // 2周目：人が送信ボタンを押す → エラーが出る → もう一度AIに直させる
   if (PASS2) {
     console.log("人が送信 → エラー → 直す、を撮ります");
-    await page.evaluate(() => {
-      document.querySelector("[data-sk-ui]")?.shadowRoot?.getElementById("close")?.click();
-      document.querySelector("form button[type=submit]")?.click();
-    });
+    // パネルは閉じない。閉じると拡張機能の状態ごと破棄され、1周目の記録が失われる。
+    await page.evaluate(() => { document.querySelector("form button[type=submit]")?.click(); });
     await sleep(2200);
     const errs = await page.$$eval(".err", ns => ns.length).catch(() => 0);
     console.log(`エラー表示       ${errs} 件`);
@@ -200,8 +212,8 @@ try {
 
   // ---- 結果を取り出す
   const info = await page.evaluate(() => {
-    const sr = document.querySelector("[data-sk-ui]")?.shadowRoot;
-    const log = [...(sr?.querySelectorAll("#log li") || [])].map(li => li.textContent.trim());
+    const sr = document.querySelector("[data-sk-panel]")?.shadowRoot;
+    let log = []; try { log = JSON.parse(document.querySelector("[data-sk-panel]")?.dataset.log || "[]"); } catch { }
     const rows = [...(sr?.querySelectorAll(".f") || [])].map(f => ({
       label: f.children[0].textContent.trim(), value: f.children[1].textContent.trim(), reason: f.children[2].textContent.trim()
     }));

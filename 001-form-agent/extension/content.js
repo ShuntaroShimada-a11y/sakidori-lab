@@ -16,6 +16,7 @@
   // ---------------------------------------------------------------- 画面（Shadow DOM）
   const host = document.createElement("div");
   host.setAttribute("data-sk-ui", "");
+  host.setAttribute("data-sk-panel", "");   // 枠と区別するための、パネル専用の目印
   host.style.cssText = "all:initial;position:fixed;z-index:2147483647;right:16px;bottom:16px";
   const sr = host.attachShadow({ mode: "open" });
   sr.innerHTML = `<style>
@@ -91,6 +92,7 @@
 
   // ---------------------------------------------------------------- 文字の地図
   let refs = new Map(), refN = 0;
+  let lastTree = "";          // 直近に返したツリー（find はこれを検索する）
 
   const ours = el => !!(el.closest && el.closest("[data-sk-ui]"));
 
@@ -103,6 +105,10 @@
   }
 
   const clean = s => String(s || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  // 「必須」「任意」などの印はラベルから外す（required は別に出しているため）
+  const stripMark = s => clean(String(s || "").replace(/[\s]*(必\s*須|任\s*意|required|optional|ひっす)[\s]*/gi, " ").replace(/^[\s*※†]+|[\s*※†]+$/g, ""));
+  // 区切り記号だけ、または短すぎるものはラベルとして使わない（「－」「/」など）
+  const usable = s => { const t = stripMark(s); return t.length >= 2 && /[\p{L}\p{N}]/u.test(t) ? t : ""; };
 
   // 要素のテキスト（入力欄の中身は含めない）
   function textOf(el) {
@@ -113,28 +119,29 @@
 
   // 実在サイトは label[for] を書いていないことが多いので、何段構えかで探す
   function labelFor(el) {
-    const aria = el.getAttribute("aria-label");
-    if (aria) return clean(aria);
+    const aria = usable(el.getAttribute("aria-label"));
+    if (aria) return aria;
     const by = el.getAttribute("aria-labelledby");
     if (by) {
-      const t = by.split(/\s+/).map(id => textOf(document.getElementById(id))).filter(Boolean).join(" ");
-      if (t) return clean(t);
+      const t = usable(by.split(/\s+/).map(id => textOf(document.getElementById(id))).filter(Boolean).join(" "));
+      if (t) return t;
     }
     if (el.id) {
       const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if (l) { const t = textOf(l); if (t) return t; }
+      if (l) { const t = usable(textOf(l)); if (t) return t; }
     }
     const wrap = el.closest("label");
-    if (wrap) { const t = textOf(wrap); if (t) return t; }
-    // 直前にあるテキスト（これが実在サイトでは一番効く）
+    if (wrap) { const t = usable(textOf(wrap)); if (t) return t; }
+    // 直前にあるテキスト（実在サイトではこれが一番効く）。
+    // 区切り記号（電話番号のあいだの「－」など）は飛ばして、さらに上へ探しに行く。
     let node = el, hops = 0;
     while (node && hops < 4) {
       let sib = node.previousElementSibling;
-      while (sib) { const t = textOf(sib); if (t) return t; sib = sib.previousElementSibling; }
+      while (sib) { const t = usable(textOf(sib)); if (t) return t; sib = sib.previousElementSibling; }
       node = node.parentElement; hops++;
       if (!node || /^(FORM|BODY|MAIN|HTML)$/.test(node.tagName)) break;
     }
-    return clean(el.placeholder || el.title || el.name || "");
+    return usable(el.placeholder) || usable(el.title) || usable(el.name) || clean(el.name || "");
   }
 
   function roleOf(el) {
@@ -161,6 +168,19 @@
     if (el.required || el.getAttribute("aria-required") === "true") return true;
     const box = el.closest("div,li,tr,p,fieldset,section");
     return !!(box && /必\s*須|required|\*/.test(box.textContent || "") && (box.textContent || "").length < 400);
+  }
+
+  // 送信後に出るエラー文を拾う（多くのサイトは欄の近くに赤い文字で出す）
+  function errorNear(el) {
+    const box = el.closest("div,li,tr,p,fieldset,section,label");
+    if (!box) return "";
+    for (const n of box.querySelectorAll('[class*="err"],[class*="Err"],[class*="invalid"],[role="alert"],[aria-live]')) {
+      if (ours(n)) continue;
+      const t = clean(n.textContent);
+      if (t && t.length < 120) return t;
+    }
+    if (el.getAttribute("aria-invalid") === "true") return "入力内容を確認してください";
+    return "";
   }
 
   function valueOf(el) {
@@ -193,6 +213,8 @@
     }
     if ((role === "radio" || role === "checkbox") && el.name) bits.push(`group="${clean(el.name)}"`);
     if (el.maxLength > 0 && el.maxLength < 5000) bits.push(`maxlength=${el.maxLength}`);
+    const err = errorNear(el);
+    if (err) bits.push(`error="${err}"`);     // 送信して怒られた内容。これを読んで直してもらう
     return bits.join(" ");
   }
 
@@ -262,88 +284,19 @@
     return /送信|確認画面|申し?込|登録する|申請する|次へ|進む|submit/.test(label);
   }
 
-  // ---------------------------------------------------------------- 道具（8つ）
+  // まだ埋まっていない必須の欄（直近の buildTree の結果に対して調べる）
+  function emptyRequired() {
+    return [...refs.values()].filter(el => {
+      const r = roleOf(el);
+      if (!/^(textbox|combobox)$/.test(r) || el.disabled || !isRequired(el)) return false;
+      const v = valueOf(el);
+      return !v || (r === "combobox" && /^(選択|選んで|指定|--|―)/.test(v));
+    });
+  }
+
+  // ---------------------------------------------------------------- 記録
   const filled = [];   // 確認画面に出す記録
   let lastReason = "";
-
-  function state() {
-    return { type: "browser_state", tabs: [{ tab_id: "page", title: document.title.slice(0, 120), url: location.href, active: true }], state_changes: [] };
-  }
-  const ok = (id, text) => ({ type: "tool_result", tool_use_id: id, toolset_name: "browser", content: [{ type: "text", text }, state()] });
-  const ng = (id, text) => ({ type: "tool_result", tool_use_id: id, toolset_name: "browser", is_error: true, content: text });
-
-  function target(input) {
-    const t = input?.target;
-    if (!t) return { err: "Error: target が指定されていません。" };
-    if (t.type === "coordinate") return { err: "Error: 座標での指定には対応していません。read_page の ref を使ってください。" };
-    const el = refs.get(t.ref);
-    if (!el || !el.isConnected) return { err: `Error: ${t.ref} is stale or not found on the current page. Re-read the page to get fresh references.` };
-    return { el };
-  }
-
-  async function run(name, input, id) {
-    switch (name) {
-      case "read_page": {
-        let root = document.body;
-        if (input?.ref) { const t = target({ target: { type: "ref", ref: input.ref } }); if (t.err) return ng(id, t.err); root = t.el; }
-        const tree = buildTree(root, input?.filter === "interactive");
-        clearMarks();
-        [...refs.values()].slice(0, 60).forEach(el => mark(el, "read"));
-        fade(700);
-        return ok(id, tree);
-      }
-      case "find": {
-        const q = String(input?.query || "").trim();
-        const tree = buildTree(document.body, false);
-        const hit = tree.split("\n").filter(l => q && l.includes(q));
-        return ok(id, hit.length ? hit.join("\n") : `「${q}」に一致する要素は見つかりませんでした。read_page で全体を確認してください。`);
-      }
-      case "get_page_text":
-        return ok(id, clean0(document.body.innerText).slice(0, MAX_TEXT));
-      case "left_click": {
-        const t = target(input); if (t.err) return ng(id, t.err);
-        const el = t.el;
-        if (isSubmit(el)) return ng(id, "Error: 送信・確認・申込のボタンは押せません。記入だけを行い、送信は人が行います。埋め終わっていれば終了してください。");
-        clearMarks(); mark(el, "act", lastReason.slice(0, 22));
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-        await sleep(160); el.click(); fade(900);
-        const role = roleOf(el);
-        if (role === "checkbox" || role === "radio") record(el, el.checked ? "チェックした" : "外した");
-        return ok(id, `${labelFor(el) || "要素"} をクリックしました。`);
-      }
-      case "type": {
-        const el = document.activeElement;
-        if (!el || !/^(INPUT|TEXTAREA)$/.test(el.tagName)) return ng(id, "Error: 入力先が選ばれていません。先に left_click で欄を選ぶか、form_input を使ってください。");
-        clearMarks(); mark(el, "act", lastReason.slice(0, 22));
-        const v = String(input?.text ?? "");
-        setNative(el, (el.value || "") + v);
-        record(el, el.value); fade(900);
-        return ok(id, `「${v.slice(0, 40)}」を入力しました。`);
-      }
-      case "form_input": {
-        const t = target(input); if (t.err) return ng(id, t.err);
-        const el = t.el;
-        if (el.disabled) return ng(id, "Error: この欄は入力できない状態です。");
-        clearMarks(); mark(el, "act", lastReason.slice(0, 22));
-        await sleep(160);
-        const got = fill(el, input?.value);
-        fade(900);
-        if (got === null) return ng(id, `Error: 「${input?.value}」に一致する選択肢がありません。選択肢：${[...el.options].map(o => clean(o.text)).join("／").slice(0, 300)}`);
-        record(el, got);
-        return ok(id, `${labelFor(el) || "欄"} に「${got}」を入れました。`);
-      }
-      case "wait": await sleep(Math.min(Number(input?.duration) || 1, 3) * 1000); return ok(id, "待ちました。");
-      case "scroll_to": {
-        const t = target(input); if (t.err) return ng(id, t.err);
-        t.el.scrollIntoView({ block: "center", behavior: "smooth" }); await sleep(300);
-        return ok(id, "その位置まで動かしました。");
-      }
-      default:
-        return ng(id, `Error: ${name} はこの環境では使えません。read_page / find / get_page_text / left_click / type / form_input / wait / scroll_to だけが使えます。`);
-    }
-  }
-
-  const clean0 = s => String(s || "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
   function record(el, value) {
     const label = labelFor(el) || "(名前なし)";
@@ -352,8 +305,7 @@
     if (i >= 0) filled[i] = row; else filled.push(row);
   }
 
-
-  // ---------------------------------------------------------------- 頭脳A：ブラウザ内蔵AI
+  // ---------------------------------------------------------------- 頭脳（2つ）
   // Chrome 138 以降の LanguageModel（Gemini Nano）。鍵も通信も要らず、端末の中だけで動く。
   // 道具を呼ばせる仕組みは無いので、「欄の一覧」を渡して「埋める値の一覧」を JSON で返させる。
   const FILL_SCHEMA = {
@@ -415,38 +367,49 @@
       .map(([k, v]) => `${k}：${v}`).join("\n") || "（情報が登録されていません）";
     const text = `【利用者の情報】\n${p}\n\n【今回の指示】\n${note || "（とくになし）"}\n\n【フォームの欄】\n${tree}`;
     const raw = await localSession.prompt(text, { responseConstraint: FILL_SCHEMA });
-    let out; try { out = JSON.parse(raw); } catch { return []; }
-    return Array.isArray(out?.fills) ? out.fills : [];
+    try { return JSON.parse(raw); } catch { return { fills: [] }; }
   }
 
-  // 頭脳Aの進め方：読む → 埋める → 読み直す、を最大3周。
-  // 読み直すので「選んだら欄が増える」にも追いつける。
-  async function runLocal(note, profile, stopped) {
-    const av = await localAvailable();
-    log("r", `ブラウザ内蔵のAIを使います（状態：${av}）`);
-    if (av === "downloadable") log("w", "初回はモデルの取得に数分かかります。");
-    let total = 0;
+  // 進め方（頭脳A・Bで共通）：
+  //   読む → まとめて聞く → まとめて埋める → 読み直す、を最大3周。
+  //   読み直すので「選んだら欄が増える」にも、「送信して怒られた」にも同じ仕組みで追いつける。
+  async function runFill(ask, label, note, profile, stopped) {
+    let total = 0, asked = [], calls = 0;
+
     for (let round = 1; round <= 3; round++) {
       if (stopped()) break;
       clearMarks();
       const tree = buildTree(document.body, true);
+      const errs = /error="/.test(tree);
+      const rest = emptyRequired();
+
+      // 2周目以降は、はっきりした理由があるときだけ聞き直す。
+      // 理由が無ければ1回の呼び出しで終わり。
+      if (round > 1 && !errs && !rest.length) break;
+
       [...refs.values()].slice(0, 60).forEach(el => mark(el, "read"));
       fade(700);
-      log("r", round === 1 ? "フォームを読んでいます" : "画面が変わったので読み直します");
+      log("r", round === 1 ? `フォームを読みました（${refs.size}項目）。${label}に聞きます`
+        : errs ? "エラーが出ています。内容を読んで直します"
+        : `必須が${rest.length}件残っています。読み直します`);
       await sleep(PAUSE);
 
-      let fills;
-      try { fills = await localAsk(tree, profile, note); }
-      catch (e) {
-        throw new Error("内蔵AIを使えませんでした：" + String(e?.message || e).slice(0, 160));
-      }
-      const todo = fills.filter(f => refs.has(String(f.ref)) && roleOf(refs.get(String(f.ref))) !== "button");
-      if (!todo.length) { if (round === 1) log("w", "埋められる欄が見つかりませんでした。"); break; }
+      calls++;
+      const plan = await ask(tree, profile, note);
+      const fills = (plan?.fills || []).filter(f => refs.has(String(f.ref)) && roleOf(refs.get(String(f.ref))) !== "button");
+      asked = plan?.ask || asked;
+      if (!fills.length) { if (round === 1) log("w", "埋められる欄が見つかりませんでした。"); break; }
 
-      for (const f of todo) {
+      for (const f of fills) {
         if (stopped()) break;
         const el = refs.get(String(f.ref));
         if (!el || !el.isConnected || el.disabled) continue;
+        // すでに同じ値が入っている欄は触らない（2周目で全部入れ直すのを防ぐ）
+        const now = valueOf(el), want = String(f.value ?? "");
+        const same = /^(checkbox|radio)$/.test(roleOf(el))
+          ? (el.checked === !(want === "" || want === "false"))
+          : (now && now === want);
+        if (same) continue;
         lastReason = String(f.reason || "").trim();
         if (lastReason) log("a", lastReason);
         clearMarks(); mark(el, "act", lastReason.slice(0, 22));
@@ -456,14 +419,23 @@
         if (got !== null) { record(el, got); total++; }
         await sleep(PAUSE);
       }
-      await sleep(500);            // 欄が増えるのを待つ
+      await sleep(600);            // 欄が増える・エラーが消えるのを待つ
     }
-    log("d", `${total}項目を埋めました。ご確認のうえ送信してください。`);
+
+    if (asked.length) log("w", `人にしか埋められない欄：${asked.join("／")}`);
+    log("d", `${filled.length}項目を埋めました（AIへの問い合わせ ${calls} 回）。ご確認のうえ送信してください。`);
   }
 
   // ---------------------------------------------------------------- 実況
   const logEl = () => sr.getElementById("log");
   function log(kind, text) {
+    // 確認画面に切り替わると要素が消えるので、DOM の属性にも残しておく。
+    // 拡張機能は隔離された領域で動くため、変数ではなく属性でないと外から読めない。
+    try {
+      const a = JSON.parse(host.dataset.log || "[]");
+      a.push(text);
+      host.dataset.log = JSON.stringify(a.slice(-80));
+    } catch { host.dataset.log = JSON.stringify([text]); }
     const ul = logEl(); if (!ul) return;
     const li = document.createElement("li");
     li.className = kind;
@@ -475,63 +447,43 @@
 
   // ---------------------------------------------------------------- 本体のループ
   async function start(note) {
-    filled.length = 0; lastReason = "";
+    lastReason = ""; host.dataset.log = "[]";
     $b.innerHTML = `<ul id="log"></ul><div class="row"><button id="stop">中止する</button></div>`;
     let stopped = false;
     sr.getElementById("stop").onclick = () => { stopped = true; log("w", "中止しました。"); };
 
     const { profile = {}, brain = "auto", apiKey = "" } = await chrome.storage.local.get(["profile", "brain", "apiKey"]);
-
-    // どちらの頭脳を使うか決める
     const av = await localAvailable();
     const canLocal = av === "available" || av === "downloadable" || av === "downloading";
     const use = brain === "local" ? "local" : brain === "claude" ? "claude" : (canLocal ? "local" : "claude");
-    if (use === "local") {
-      if (!canLocal) { fail(`このブラウザではAIを端末内で動かせません（状態：${av}）。設定でAPIキーを入れると Claude で動きます。`); return; }
-      try { await runLocal(note, profile, () => stopped); done(); }
-      catch (e) {
-        if (apiKey) { log("w", String(e.message || e)); log("r", "Claude に切り替えます。"); }
-        else { fail(String(e.message || e) + "\n設定でAPIキーを入れると Claude で動きます。"); return; }
-      }
-      if (!apiKey) return;
-      if (filled.length) { done(); return; }
-    }
-    if (!apiKey) { fail("APIキーが未設定です。設定画面で入れてください。"); return; }
-    log("r", "Claude を使います。");
-    const messages = [{ role: "user", content: note || "保存されている情報で、このフォームを埋めてください。" }];
 
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
-      if (stopped) break;
+    // Claude 側も同じ形で答えてもらう（背景の service worker が API を呼ぶ）
+    const askClaude = async (tree, prof, nt) => {
       let res;
-      try { res = await chrome.runtime.sendMessage({ type: "call", messages, profile, note }); }
-      catch (e) { res = { error: "拡張機能との通信が切れました。ページを読み込み直してください。" }; }
-      if (!res || res.error || !res.data) { fail(res?.error || "応答がありませんでした。"); return; }
-      const msg = res.data;
+      try { res = await chrome.runtime.sendMessage({ type: "plan", tree, profile: prof, note: nt }); }
+      catch { throw new Error("拡張機能との通信が切れました。ページを読み込み直してください。"); }
+      if (!res || res.error) throw new Error(res?.error || "応答がありませんでした。");
+      return res.plan;
+    };
 
-      for (const blk of msg.content || []) {
-        if (blk.type === "text" && blk.text.trim()) { lastReason = blk.text.trim(); log(/エラー|戻され|失敗|見つか/.test(lastReason) ? "w" : "r", lastReason); }
+    try {
+      if (use === "local") {
+        if (!canLocal) throw new Error(`このブラウザではAIを端末内で動かせません（状態：${av}）。`);
+        await runFill(localAsk, "ブラウザ内蔵のAI", note, profile, () => stopped);
+      } else {
+        if (!apiKey) { fail("APIキーが未設定です。設定画面で入れてください。"); return; }
+        await runFill(askClaude, "Claude", note, profile, () => stopped);
       }
-      messages.push({ role: "assistant", content: msg.content });
-
-      if (msg.stop_reason === "max_tokens") { log("w", "応答が長すぎたので止めます。"); break; }
-      const calls = (msg.content || []).filter(b => b.type === "tool_use" || b.type === "server_tool_use" || b.type === "browser_tool_use");
-      if (msg.stop_reason !== "tool_use" || !calls.length) { done(); return; }
-
-      const results = [];
-      let halted = false;
-      for (const c of calls) {
-        if (stopped) break;
-        if (halted) { results.push(ng(c.id, "Not executed: an earlier action in this turn failed.")); continue; }
-        const name = c.name === "browser" ? (c.input?.action || c.input?.name) : (c.name || "").replace(/^browser__?/, "");
-        let r;
-        try { r = await run(name, c.input || {}, c.id); }
-        catch (e) { r = ng(c.id, "Error: " + String(e).slice(0, 180)); }
-        if (r.is_error) halted = true;
-        results.push(r);
-        await sleep(PAUSE);
+    } catch (e) {
+      // 内蔵AIがだめなら Claude に落とす
+      if (use === "local" && apiKey) {
+        log("w", String(e.message || e));
+        try { await runFill(askClaude, "Claude", note, profile, () => stopped); }
+        catch (e2) { fail(String(e2.message || e2)); return; }
+      } else {
+        fail(String(e.message || e) + (use === "local" ? "\n設定でAPIキーを入れると Claude で動きます。" : ""));
+        return;
       }
-      messages.push({ role: "user", content: results });
-      if (messages.length > 40) { log("w", "やり取りが長くなったので止めます。"); break; }
     }
     done();
   }
@@ -559,10 +511,15 @@
       return;
     }
 
+    // まだ埋まっていない必須の欄（人が何をすべきか分かるように）
+    buildTree(document.body, true);
+    const rest = emptyRequired();
+
     const warnN = filled.filter(isGuess).length;
     $b.innerHTML = `<div class="res" style="border:0;margin:0;padding:0">
       <h4>入力した内容（${filled.length}項目）</h4>
       <div id="list"></div>
+      ${rest.length ? `<div class="err" style="margin-bottom:10px"><b>まだ空の必須項目が ${rest.length} 件あります</b><br>${rest.map(el => esc0(labelFor(el))).join("／")}<br>この欄を埋めないと送信できません。</div>` : ""}
       <div class="note">${warnN ? `<b style="color:#E8C55A">⚠ が付いた ${warnN} 項目は、保存した情報そのものではありません。</b>とくに確認してください。<br>` : ""}
       行を押すと、その欄まで移動して光ります。直したい場合はページ上で直接どうぞ。<br>
       <b>送信はこの拡張機能では行いません。</b>内容を確認して、ご自身で送信ボタンを押してください。</div>

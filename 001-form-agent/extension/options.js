@@ -8,8 +8,9 @@ const $ = id => document.getElementById(id);
 
 // storage には「日本語のラベル → 値」で入れる。そのまま Claude に渡すため
 async function load() {
-  const { apiKey = "", profile = {}, brain = "auto" } = await chrome.storage.local.get(["apiKey", "profile", "brain"]);
+  const { apiKey = "", profile = {}, brain = "auto", workspaceId = "" } = await chrome.storage.local.get(["apiKey", "profile", "brain", "workspaceId"]);
   $("apiKey").value = apiKey;
+  $("workspaceId").value = workspaceId;
   $("brain").value = brain;
   for (const [id, label] of Object.entries(FIELDS)) $(id).value = profile[label] || "";
   showAvailability();
@@ -80,7 +81,7 @@ async function save() {
     const v = $(id).value.trim();
     if (v) profile[label] = v;
   }
-  await chrome.storage.local.set({ apiKey: $("apiKey").value.trim(), profile, brain: $("brain").value });
+  await chrome.storage.local.set({ apiKey: $("apiKey").value.trim(), profile, brain: $("brain").value, workspaceId: $("workspaceId").value.trim() });
   const n = Object.keys(profile).length;
   flash(`保存しました（情報 ${n} 項目）`);
 }
