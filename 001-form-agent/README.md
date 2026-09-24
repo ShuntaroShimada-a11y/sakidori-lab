@@ -93,6 +93,34 @@ npm run rec:001
 
 出るもの：アニメーション（`.webp`）、最後の画面（`.png`）、実況ログ（`.log.txt`）、1コマずつのPNG（`frames/`）。
 
+### 出した動画をどこで開くか
+
+| 開き方 | |
+| --- | --- |
+| **ブラウザにドラッグ**（Chrome / Edge / Firefox） | ◯ いちばん確実 |
+| Windows の「フォト」 | △ 1コマ目しか出ないことがある |
+| Zenn の記事・GitHub・紹介ページ | ◯ `.webp` をそのまま貼れる |
+| **X（旧Twitter）** | **× アニメーションWebPは非対応** |
+
+X に出すときは GIF に変換します（X 側で動画に変換されます）。
+
+```bash
+node 001-form-agent/script/to-gif.mjs
+WIDTH=640 MAX=24 node 001-form-agent/script/to-gif.mjs   # 重いとき
+```
+
+## 本番を回す前に通す検査
+
+同じところで失敗しないよう、2段構えにしてあります。**必ずこの順で通してから録画してください。**
+
+| | 何を見るか | 費用 |
+| --- | --- | --- |
+| `node 001-form-agent/script/dryrun.mjs` | **APIを使わず** content.js をブラウザで通しで動かす（15項目） | **0円** |
+| `node 001-form-agent/script/preflight.mjs` | APIの応答だけを1回検証（8項目） | 1〜2円 |
+
+ドライランは chrome.* を差し替え、AIの代わりに「ツリーを読んで値を決める偽の頭脳」を使います。
+実行時エラー・入力結果・問い合わせ回数まで確かめられます。
+
 指示文と頭脳は環境変数で変えられます。
 
 ```bash
