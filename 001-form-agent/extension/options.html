@@ -41,18 +41,31 @@ ul{margin:6px 0 0;padding-left:20px;font-size:13.5px;color:var(--muted);line-hei
 
   <div class="note">
     <b>ここに入れた内容は、この端末の中だけに保存されます。</b>
-    フォームを埋めるときに Anthropic（Claude）へ送られますが、<b>運営者のサーバーは一切通りません</b>。保存も集計もしていません。
+    <b>ブラウザ内蔵のAIを使う場合は、どこにも送信されません</b>（すべて端末の中で処理されます）。
+    Claude を使う場合は Anthropic へ送られますが、<b>運営者のサーバーは一切通りません</b>。保存も集計もしていません。
   </div>
 
-  <h2>1. APIキー</h2>
-  <p class="sub">Claude のAPIキー。<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> で発行できます。</p>
+  <h2>1. どのAIを使うか</h2>
+  <p class="sub">ブラウザに内蔵されたAIなら、登録も費用も要りません。</p>
+  <div class="card">
+    <label for="brain">使うAI</label>
+    <select id="brain">
+      <option value="auto">自動（使えるほうを選ぶ）</option>
+      <option value="local">ブラウザ内蔵のAI（無料・鍵不要・通信なし）</option>
+      <option value="claude">Claude（APIキーが要る・難しいフォームに強い）</option>
+    </select>
+    <p id="avail" class="sub" style="margin:10px 0 0">確認しています…</p>
+  </div>
+
+  <h2>2. APIキー（Claude を使うときだけ）</h2>
+  <p class="sub"><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> で発行できます。内蔵のAIだけで使うなら、空のままで構いません。</p>
   <div class="card">
     <label for="apiKey">APIキー（sk-ant-… で始まる文字列）</label>
     <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-api03-…">
     <label style="margin-top:10px"><input type="checkbox" id="reveal" style="width:auto;margin-right:6px">入力した文字を表示する</label>
   </div>
 
-  <h2>2. よく使う自分の情報</h2>
+  <h2>3. よく使う自分の情報</h2>
   <p class="sub">一度入れておけば、どのフォームでも使い回します。空の項目は使われません。</p>
   <div class="card">
     <div class="grid">
@@ -83,6 +96,7 @@ ul{margin:6px 0 0;padding-left:20px;font-size:13.5px;color:var(--muted);line-hei
   <div class="note">
     <ul>
       <li><b>送信ボタンを押しません。</b>埋めるところまでで止まります</li>
+      <li><b>運営者のサーバーを通しません。</b>内蔵AIなら通信そのものが発生しません</li>
       <li><b>CAPTCHA・画像認証には触れません。</b>出てきたらそこで終了します</li>
       <li><b>ログインしません。</b>IDやパスワードは扱いません</li>
       <li><b>別のページへ移動しません。</b>いま開いているページの中だけで動きます</li>

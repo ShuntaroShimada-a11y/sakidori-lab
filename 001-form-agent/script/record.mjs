@@ -3,7 +3,13 @@
 //   cd lab && npm install            … 最初の1回だけ
 //   cd lab && npm run rec:001        … 撮る
 //
-// APIキーの渡し方（どちらか）
+// 使う頭脳を選べます
+//   BRAIN=local   … ブラウザ内蔵のAI（鍵不要）。Chrome でしか動きません
+//   BRAIN=claude  … Claude（APIキーが要る）
+//   BRAIN=auto    … 使えるほう（既定）
+// PASS2=1 を付けると「人が送信 → エラーが出る → AIが直す」の2周目まで撮ります
+//
+// APIキーの渡し方（どちらか。BRAIN=local なら不要）
 //   1. lab/001-form-agent/_local/apikey.txt にキーだけを書いたファイルを置く（_local は git に入らない）
 //   2. 環境変数 ANTHROPIC_API_KEY
 //
@@ -30,6 +36,8 @@ const STAMP = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 13);
 
 // 埋めてほしいことの指示。動画に出るので、短く具体的に
 const NOTE = process.env.NOTE || "資料請求です。請求書の宛名を変更したい件で、急ぎです。連絡はメールで。";
+const BRAIN = process.env.BRAIN || "auto";
+const PASS2 = process.env.PASS2 === "1";
 
 // 設定画面に入れる「自分の情報」。録画用なのでダミー
 const PROFILE = {
@@ -47,6 +55,7 @@ function apiKey() {
   if (existsSync(f)) { const k = readFileSync(f, "utf8").trim(); if (k) return k; }
   const e = (process.env.ANTHROPIC_API_KEY || "").trim();
   if (e) return e;
+  if (BRAIN === "local") return "";       // 内蔵AIなら鍵は要らない
   console.error(`
 APIキーが見つかりません。次のどちらかを用意してください。
 
@@ -120,8 +129,9 @@ try {
   console.log(`拡張機能         ${new URL(target.url()).host}`);
 
   // 設定を入れる（本来は設定画面から人が入れるところ）
-  await worker.evaluate(async (k, p) => { await chrome.storage.local.set({ apiKey: k, profile: p }); }, KEY, PROFILE);
+  await worker.evaluate(async (k, p, b) => { await chrome.storage.local.set({ apiKey: k, profile: p, brain: b }); }, KEY, PROFILE, BRAIN);
   console.log(`保存した情報     ${Object.keys(PROFILE).length} 項目`);
+  console.log(`使う頭脳         ${BRAIN}${KEY ? "" : "（APIキーなし）"}`);
 
   const page = (await browser.pages())[0] || await browser.newPage();
   await page.setViewport({ width: 1280, height: 900 });
@@ -134,9 +144,22 @@ try {
   if (!tabId) throw new Error("タブを特定できませんでした。");
   await worker.evaluate(async id => { await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content.js"] }); }, tabId);
 
-  const panel = () => page.waitForFunction(
+  const invoke = async () => {
+    await worker.evaluate(async id => { await chrome.scripting.executeScript({ target: { tabId: id }, files: ["content.js"] }); }, tabId);
+    await page.waitForFunction(
+      () => !!document.querySelector("[data-sk-ui]")?.shadowRoot?.getElementById("note"), { timeout: 15000 });
+  };
+  const go = async t => page.evaluate(x => {
+    const sr = document.querySelector("[data-sk-ui]").shadowRoot;
+    sr.getElementById("note").value = x;
+    sr.getElementById("go").click();
+  }, t);
+  const settle = () => page.waitForFunction(() => {
+    const sr = document.querySelector("[data-sk-ui]")?.shadowRoot;
+    return !!(sr?.getElementById("list") || sr?.querySelector(".err") || sr?.querySelector(".note"));
+  }, { timeout: 180000, polling: 800 }).catch(() => console.log("！ 時間切れ。そこまでを保存します。"));
+  await page.waitForFunction(
     () => !!document.querySelector("[data-sk-ui]")?.shadowRoot?.getElementById("note"), { timeout: 15000 });
-  await panel();
 
   // ---- 撮影開始
   const frames = [];
@@ -148,22 +171,31 @@ try {
     }
   })();
 
-  // 指示を書いて、下書きを始める
-  await page.evaluate(t => {
-    const sr = document.querySelector("[data-sk-ui]").shadowRoot;
-    sr.getElementById("note").value = t;
-    sr.getElementById("go").click();
-  }, NOTE);
+  // 1周目：指示を書いて、下書きを始める
+  await go(NOTE);
   console.log(`指示             ${NOTE}`);
   console.log("記入中…（最大3分）");
+  await settle();
+  await sleep(2400);            // 確認画面を数コマ映す
 
-  // 確認画面かエラーが出るまで待つ
-  await page.waitForFunction(() => {
-    const sr = document.querySelector("[data-sk-ui]")?.shadowRoot;
-    return !!(sr?.getElementById("list") || sr?.querySelector(".err") || sr?.querySelector(".note"));
-  }, { timeout: 180000, polling: 800 }).catch(() => console.log("！ 時間切れ。そこまでを保存します。"));
-
-  await sleep(2600);            // 確認画面を数コマ映す
+  // 2周目：人が送信ボタンを押す → エラーが出る → もう一度AIに直させる
+  if (PASS2) {
+    console.log("人が送信 → エラー → 直す、を撮ります");
+    await page.evaluate(() => {
+      document.querySelector("[data-sk-ui]")?.shadowRoot?.getElementById("close")?.click();
+      document.querySelector("form button[type=submit]")?.click();
+    });
+    await sleep(2200);
+    const errs = await page.$$eval(".err", ns => ns.length).catch(() => 0);
+    console.log(`エラー表示       ${errs} 件`);
+    if (errs) {
+      await invoke();
+      await sleep(600);
+      await go("エラーが出ています。指摘されている欄を直してください。");
+      await settle();
+      await sleep(2600);
+    }
+  }
   shooting = false; await shoot;
 
   // ---- 結果を取り出す

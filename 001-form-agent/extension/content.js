@@ -352,6 +352,111 @@
     if (i >= 0) filled[i] = row; else filled.push(row);
   }
 
+
+  // ---------------------------------------------------------------- 頭脳A：ブラウザ内蔵AI
+  // Chrome 138 以降の LanguageModel（Gemini Nano）。鍵も通信も要らず、端末の中だけで動く。
+  // 道具を呼ばせる仕組みは無いので、「欄の一覧」を渡して「埋める値の一覧」を JSON で返させる。
+  const FILL_SCHEMA = {
+    type: "object",
+    properties: {
+      fills: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            ref: { type: "string", description: "[ref_N] の N を含む文字列。例 ref_3" },
+            value: { type: "string", description: "入れる値。checkbox と radio は checked" },
+            reason: { type: "string", description: "なぜその値にしたかを15〜30字の日本語で" }
+          },
+          required: ["ref", "value"]
+        }
+      }
+    },
+    required: ["fills"]
+  };
+
+  const LOCAL_RULES = `あなたはWebフォームの記入を手伝います。欄の一覧と利用者の情報から、埋めるべき欄と値だけを返します。
+
+守ること
+- 利用者の情報に無いことは書かない。確信が持てない欄は返さない
+- すでに値が入っている欄（value=... があるもの）は返さない
+- button は絶対に返さない（送信は人が行う）
+- 「全角カナ」「フリガナ」とある欄は、カタカナに直して入れる
+- 電話番号や郵便番号が複数の欄に分かれているときは、自分で分割して入れる
+- hint="…" は入力例。その形式に合わせる
+- checkbox と radio は value を checked にする
+- 金額・日付・同意のチェックは、指示に明記が無いかぎり返さない`;
+
+  async function localAvailable() {
+    try {
+      if (typeof LanguageModel === "undefined") return "なし";
+      return await LanguageModel.availability();     // unavailable / downloadable / downloading / available
+    } catch { return "なし"; }
+  }
+
+  let localSession = null;
+  async function localAsk(tree, profile, note) {
+    if (!localSession) {
+      localSession = await LanguageModel.create({
+        initialPrompts: [{ role: "system", content: LOCAL_RULES }],
+        monitor(m) {
+          m.addEventListener("downloadprogress", e => {
+            const pct = Math.round((e.loaded || 0) * 100);
+            log("r", `AIモデルを取得しています… ${pct}%（初回だけ）`);
+          });
+        }
+      });
+    }
+    const p = Object.entries(profile || {}).filter(([, v]) => String(v || "").trim())
+      .map(([k, v]) => `${k}：${v}`).join("\n") || "（情報が登録されていません）";
+    const text = `【利用者の情報】\n${p}\n\n【今回の指示】\n${note || "（とくになし）"}\n\n【フォームの欄】\n${tree}`;
+    const raw = await localSession.prompt(text, { responseConstraint: FILL_SCHEMA });
+    let out; try { out = JSON.parse(raw); } catch { return []; }
+    return Array.isArray(out?.fills) ? out.fills : [];
+  }
+
+  // 頭脳Aの進め方：読む → 埋める → 読み直す、を最大3周。
+  // 読み直すので「選んだら欄が増える」にも追いつける。
+  async function runLocal(note, profile, stopped) {
+    const av = await localAvailable();
+    log("r", `ブラウザ内蔵のAIを使います（状態：${av}）`);
+    if (av === "downloadable") log("w", "初回はモデルの取得に数分かかります。");
+    let total = 0;
+    for (let round = 1; round <= 3; round++) {
+      if (stopped()) break;
+      clearMarks();
+      const tree = buildTree(document.body, true);
+      [...refs.values()].slice(0, 60).forEach(el => mark(el, "read"));
+      fade(700);
+      log("r", round === 1 ? "フォームを読んでいます" : "画面が変わったので読み直します");
+      await sleep(PAUSE);
+
+      let fills;
+      try { fills = await localAsk(tree, profile, note); }
+      catch (e) {
+        throw new Error("内蔵AIを使えませんでした：" + String(e?.message || e).slice(0, 160));
+      }
+      const todo = fills.filter(f => refs.has(String(f.ref)) && roleOf(refs.get(String(f.ref))) !== "button");
+      if (!todo.length) { if (round === 1) log("w", "埋められる欄が見つかりませんでした。"); break; }
+
+      for (const f of todo) {
+        if (stopped()) break;
+        const el = refs.get(String(f.ref));
+        if (!el || !el.isConnected || el.disabled) continue;
+        lastReason = String(f.reason || "").trim();
+        if (lastReason) log("a", lastReason);
+        clearMarks(); mark(el, "act", lastReason.slice(0, 22));
+        await sleep(160);
+        const got = fill(el, f.value);
+        fade(900);
+        if (got !== null) { record(el, got); total++; }
+        await sleep(PAUSE);
+      }
+      await sleep(500);            // 欄が増えるのを待つ
+    }
+    log("d", `${total}項目を埋めました。ご確認のうえ送信してください。`);
+  }
+
   // ---------------------------------------------------------------- 実況
   const logEl = () => sr.getElementById("log");
   function log(kind, text) {
@@ -371,9 +476,25 @@
     let stopped = false;
     sr.getElementById("stop").onclick = () => { stopped = true; log("w", "中止しました。"); };
 
-    const { profile = {} } = await chrome.storage.local.get("profile");
+    const { profile = {}, brain = "auto", apiKey = "" } = await chrome.storage.local.get(["profile", "brain", "apiKey"]);
+
+    // どちらの頭脳を使うか決める
+    const av = await localAvailable();
+    const canLocal = av === "available" || av === "downloadable" || av === "downloading";
+    const use = brain === "local" ? "local" : brain === "claude" ? "claude" : (canLocal ? "local" : "claude");
+    if (use === "local") {
+      if (!canLocal) { fail(`このブラウザではAIを端末内で動かせません（状態：${av}）。設定でAPIキーを入れると Claude で動きます。`); return; }
+      try { await runLocal(note, profile, () => stopped); done(); }
+      catch (e) {
+        if (apiKey) { log("w", String(e.message || e)); log("r", "Claude に切り替えます。"); }
+        else { fail(String(e.message || e) + "\n設定でAPIキーを入れると Claude で動きます。"); return; }
+      }
+      if (!apiKey) return;
+      if (filled.length) { done(); return; }
+    }
+    if (!apiKey) { fail("APIキーが未設定です。設定画面で入れてください。"); return; }
+    log("r", "Claude を使います。");
     const messages = [{ role: "user", content: note || "保存されている情報で、このフォームを埋めてください。" }];
-    log("r", "はじめます。");
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (stopped) break;
@@ -466,17 +587,23 @@
 
   // ---------------------------------------------------------------- 最初の画面
   async function open() {
-    const st = await chrome.storage.local.get(["apiKey", "profile"]);
-    if (!(st.apiKey || "").trim()) {
-      $b.innerHTML = `<div class="note">はじめに、設定画面で <b>APIキー</b>と<b>よく使う自分の情報</b>を登録してください。どちらもこの端末の中だけに保存されます。</div>
+    const st = await chrome.storage.local.get(["apiKey", "profile", "brain"]);
+    const av = await localAvailable();
+    const canLocal = av === "available" || av === "downloadable" || av === "downloading";
+    const brain = st.brain || "auto";
+    const use = brain === "local" ? "local" : brain === "claude" ? "claude" : (canLocal ? "local" : "claude");
+    if (use === "claude" && !(st.apiKey || "").trim()) {
+      $b.innerHTML = `<div class="note">このブラウザでは<b>端末内のAIが使えません</b>（状態：${av}）。<br>
+        設定画面で <b>APIキー</b>と<b>よく使う自分の情報</b>を登録すると、Claude で動きます。どちらもこの端末の中だけに保存されます。</div>
         <div class="row"><button class="pri" id="opt">設定を開く</button></div>`;
       sr.getElementById("opt").onclick = () => chrome.runtime.sendMessage({ type: "openOptions" });
       return;
     }
     const n = Object.values(st.profile || {}).filter(v => String(v || "").trim()).length;
+    const label = use === "local" ? "ブラウザ内蔵のAI（無料）" : "Claude";
     $b.innerHTML = `<textarea id="note" placeholder="例：資料請求です。導入は来期から検討。&#10;（空でも、保存した情報だけで埋めます）"></textarea>
       <div class="row"><button id="opt">設定</button><button class="pri" id="go">下書きする</button></div>
-      <div class="note">保存済みの情報 ${n} 項目を使います。<b>送信はしません</b>——埋めたあと、内容を確認してご自身で送信してください。</div>`;
+      <div class="note">${label}が、保存済みの情報 ${n} 項目を使って埋めます。<b>送信はしません</b>——埋めたあと、内容を確認してご自身で送信してください。</div>`;
     const ta = sr.getElementById("note");
     ta.focus();
     sr.getElementById("opt").onclick = () => chrome.runtime.sendMessage({ type: "openOptions" });
