@@ -66,6 +66,30 @@ cd extension/test && python -m http.server 8787   # → http://localhost:8787/fo
 # 方法B：chrome://extensions の詳細で「ファイルの URL へのアクセスを許可する」を ON
 ```
 
+## 録画する
+
+フォームを埋めるところを自動で撮ります。出力は `_local/` の中（git には入りません）。
+
+```bash
+cd lab && npm install        # 最初の1回だけ
+# _local/apikey.txt に Anthropic の APIキーを書く（または環境変数 ANTHROPIC_API_KEY）
+npm run rec:001
+```
+
+出るもの：アニメーション（`.webp`）、最後の画面（`.png`）、実況ログ（`.log.txt`）、1コマずつのPNG（`frames/`）。
+
+指示文は `NOTE` で変えられます。
+
+```bash
+NOTE="採用への応募です。エンジニア職で、来月から勤務可能。" npm run rec:001
+```
+
+> **Chrome 152 以降はコマンドラインからの拡張機能の読み込みを拒否します。** そのため録画は **Edge** を使います
+> （どちらも Chromium なので、拡張機能の動きも撮れる絵も同じ）。`BROWSER_PATH` で明示もできます。
+
+録画では、わざと崩した情報を渡しています。**カナをひらがなで、電話番号を1本で**保存しておき、
+AIが全角カナに直すところと、3つの欄に分けるところが映るようにしてあります。
+
 ## しないこと
 
 - **送信ボタンを押さない**（`isSubmit()` で構造的に弾いています）

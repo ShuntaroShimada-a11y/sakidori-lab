@@ -1,0 +1,13 @@
+{
+  "name": "sakidori-lab",
+  "private": true,
+  "type": "module",
+  "description": "週末ラボ。手元で動かす道具（録画など）の依存だけを置く",
+  "scripts": {
+    "rec:001": "node 001-form-agent/script/record.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1",
+    "sharp": "^0.34.5"
+  }
+}
